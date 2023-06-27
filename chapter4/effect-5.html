@@ -1,0 +1,125 @@
+<body>
+  
+</body>
+<script>
+  // 用一个全局变量存储被注册的副作用函数
+  let activeEffect
+
+  // effect 函数用于注册副作用函数
+  function effect(fn) {
+    const effectFn = () => {
+      // 调用 clearup 函数完成清除工作
+      cleanup(effectFn)
+      // 当 effectFn 执行的时候，将其设置为当前激活的副作用函数
+      activeEffect = effectFn
+      fn()
+    }
+    // activeEffect.deps 用来存储所有与该副作用函数相关联的依赖集合
+    effectFn.deps = []
+    effectFn()
+  }
+
+
+  // 存储副作用函数的桶
+  const bucket = new WeakMap()
+  
+  // 原始数据
+  const data = { ok: true, text: 'hello world'}
+
+  // 对原始数据的代理
+  const obj = new Proxy(data, {
+    get(target, key) {
+      // 没有 activeEffect，直接 return
+      if (!activeEffect) {
+        return target[key]
+      }
+
+      // 将副作用函数 acctiveEffect 添加到存储副作用函数的桶中
+      track(target, key)
+
+      // 返回属性值
+      return target[key]
+    },
+    set(target, key, value) {
+      // 设置属性值
+      target[key] = value
+      
+      // 把副作用函数从桶里取出并执行
+      trigger(target, key)
+    }
+  })
+
+  // 在 get 拦截函数内调用 track 函数追踪变化
+  function track(target, key) {
+    if (!activeEffect) {
+      return
+    }
+    // 根据 target 从“桶”中取得depsMap,它是一个 Map 类型 key ---> effects
+    let depsMap = bucket.get(target)
+      // 如果不存在，则新建一个 Map 并与之 target 关联
+      if (!depsMap) {
+        bucket.set(target, (depsMap = new Map()))
+      }
+
+      // 在根据 key 从 depsMap 中取得 deps，它是一个 Set 类型
+      // 里面存储着所有与当前 key 相关联的副作用函数 effects
+      let deps = depsMap.get(key)
+      // 如果 deps 不存在，则同样新建一个 Set 与 key 关联
+      if (!deps) {
+        depsMap.set(key, (deps = new Set()))
+      }
+
+      // 最后将当前激活的副作用函数添加到桶中
+      deps.add(activeEffect)
+
+      // deps 就是一个与当前副作用函数存在联系的依赖集合
+      // 将其添加到 activeEffect.deps 数组中
+      activeEffect.deps.push(deps) // 新增
+  }
+
+  // 在 set 拦截函数内容调用 trigger 函数触发变化
+  function trigger(target, key) {
+    // 根据 target 从桶中取出 depsMap, 它是 key ---> effects
+    const depsMap = bucket.get(target)
+
+    if (!depsMap) {
+      return
+    }
+
+    // 在根据 key 取得所有的副作用函数 effects
+    const effects = depsMap.get(key)
+
+    const effectToRun = new Set(effects)
+
+    // 执行副作用函数
+    effectToRun && effectToRun.forEach(fn => fn())
+  }
+
+  function cleanup(effectFn) {
+    // 遍历 effectFn.deps 数组
+    for(let i = 0; i < effectFn.deps.length; i++) {
+      // deps 是依赖集合
+      const deps = effectFn.deps[i]
+      // 将 effectFn 从依赖集合中移除
+      deps.delete(effectFn)
+    }
+    // 最后需要重置 effectFn.deps 数组
+    effectFn.deps.length = 0
+  }
+
+  effect(
+    // 一个匿名函数
+    () => {
+      console.log('effect run');
+      document.body.innerText = obj.ok ? obj.text: 'not'
+      console.log('bucket---old', bucket);
+      
+    }
+  )
+
+  setTimeout(() => {
+    obj.ok = false
+    obj.text = 'hello vue3'
+    console.log('bucket', bucket);
+  }, 1000)
+</script>
