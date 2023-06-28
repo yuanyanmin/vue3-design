@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
+<body>
+  <script>
+
+
+ 
+
+    function Render(obj, root) {
+      const el = document.createElement(obj.tag)
+      if (typeof obj.children === 'string') {
+        const text = document.createTextNode(obj.children)
+        el.appendChild(text)
+      } else if (obj.children) {
+        // 数组 递归调用 render
+        obj.children.forEach(element => {
+          Render(element, el)
+        });
+      }
+
+      root.appendChild(el)
+    }
+
+    function Compiler()
+
+
+
+    // 运行时框架
+    const obj = {
+      tag: 'div',
+      children: [
+        { tag: 'span', children: 'hello world'}
+      ]
+    }
+    Render(obj, document.body)
+
+    // 编译时框架
+    const html = `
+      <div>
+        <span>hellow world</span>  
+      </div>
+    `
+
+    const obj1 = Compiler(html)
+    Render(obj1, document.body)
+
+  </script>
+</body>
+</html>
