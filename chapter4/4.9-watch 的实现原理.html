@@ -105,32 +105,86 @@
       effectFn.deps.length = 0
     }
 
-    function computed(getter) {
-      let value
-      let dirty = true
-      const effectFn = effect(getter, {
+    function traverse(value, seen = new Set()) {
+      if (typeof value !== 'object' || value === null || seen.has(value)) {
+        return
+      }
+      seen.add(value)
+      for (const k in value) {
+        traverse(value[k], k)
+      }
+      return value
+    }
+
+    // function watch(source, cb) {
+    //   effect(() => traverse(source), {
+    //     scheduler() {
+    //       cb()
+    //     }
+    //   })
+    // }
+
+    // watch(obj, () => {
+    //   console.log('数据变了');
+    // })
+
+    function watch(source, cb, options = {}) {
+      let getter
+      if (typeof source === 'function') {
+        getter = source
+      } else {
+        getter = () => traverse(source)
+      }
+      let oldValue, newValue
+
+      const job = () => {
+        newValue = effectFn()
+        cb(newValue, oldValue)
+        oldValue = newValue
+
+      }
+
+      const effectFn = effect(() => getter(), {
+        scheduler: () => {
+           // 在调度函数中判断 flush 是否为 post , 如果是，将其放到微任务队列中执行
+          if (options.flush === 'post') {
+            const p = Promise.resolve()
+            p.then(job)
+          } else {
+            job()
+          }
+        },
         lazy: true
       })
 
-      const obj = {
-        get value() {
-          if (dirty) {
-            value = effectFn()
-            dirty = false
-          }
-          return value
-        }
+      if (options.immediate) {
+        job()
+      } else {
+        oldValue = effectFn()
       }
-
-      return obj
     }
 
     
-    const sumRes = computed(() => obj.foo + obj.bar)
-    console.log(sumRes.value);
+ 
+
+    watch(() => obj.foo, (newVal, oldVal) => {
+      console.log('obj.foo 数据变了', newVal, oldVal);
+    })
+
+    watch(() => obj, (newVal, oldVal) => {
+      console.log('obj.foo 立刻执行', newVal, oldVal);
+    }, {
+      immediate: true
+    })
+
+    watch(() => obj, (newVal, oldVal) => {
+      console.log('obj.foo 立刻执行', newVal, oldVal);
+    }, {
+      // 回调函数会在 watch 创建时立即执行一次
+      flush: 'pre' // 还可以指定为 post || sync
+    })
     
     obj.foo++
-    console.log(sumRes.value);
   </script>
 </body>
 </html>
