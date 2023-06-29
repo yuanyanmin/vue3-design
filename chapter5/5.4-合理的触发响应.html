@@ -27,63 +27,8 @@
 
  // 存储副作用函数的桶
  const bucket = new WeakMap()
- // 原始数据
-//  const data = {
-//    foo: 1
-//  }
+
  const ITERATE_KEY = Symbol()
- // 代理对象
-//  const obj = new Proxy(data, {
-//    get(target, key, receiver) {
-//      // 没有 activeEffect，直接 return
-//      if (!activeEffect) {
-//        return target[key]
-//      }
-
-//      // 将副作用函数 acctiveEffect 添加到存储副作用函数的桶中
-//      track(target, key)
-
-//      // 返回属性值
-//      // return target[key]
-//      return Reflect.get(target, key, receiver)
-//    },
-//    set(target, key, newVal, receiver) {
-//     // 先获取旧值
-//     const oldVal = target[key]
-//      // 设置属性值
-//     //  target[key] = value
-//     // 如果属性不存在，则说明是添加新属性，否则是设置已有属性
-//     const type = Object.prototype.hasOwnProperty.call(target, key) ? 'SET' : 'ADD'
-
-//      // 设置属性值
-//      const res = Reflect.set(target, key, newVal, receiver)
-//      // 比较新值和旧值，只要当不全等的时候才触发响应
-//      if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
-//        // 把副作用函数从桶里取出并执行
-//        trigger(target, key, type)
-//      }
-//      return res
-//    },
-//    has(target, key) {
-//     track(target, key)
-//     return Reflect.has(target, key)
-//    },
-//    ownKeys(target) {
-//     track(target, ITERATE_KEY)
-//     return Reflect.ownKeys(target)
-//    },
-//    deleteProperty(target, key) {
-//     // 检查被操作的属性是否是对象自己的属性
-//     const hadKey = Object.prototype.hasOwnProperty.call(target, key)
-//     // 使用 Reflect.deletePrototype 完成属性的删除
-//     const res = Reflect.deleteProperty(target, key)
-
-//     if (res && hadKey) {
-//       // 只有当删除的属性是对象自己的属性并且成功删除时，才触发更新
-//       trigger(target, key, "DELETE")
-//     }
-//    }
-//  })
 
   // 在 get 拦截函数内调用 track 函数追踪变化
   function track(target, key) {
@@ -175,16 +120,17 @@
  function reactive(obj) {
   return new Proxy(obj, {
     get(target, key, receiver) {
+      console.log('key', key);
+      // 代理对象可以通过 raw 属性访问原始数据
+      if (key === 'raw') {
+        return target
+      }
+
       // 没有 activeEffect，直接 return
       if (!activeEffect) {
         return target[key]
       }
 
-      // 代理对象可以通过 raw 属性访问原始数据
-      if (key === 'raw') {
-        console.log(1212);
-        return target
-      }
 
       // 将副作用函数 acctiveEffect 添加到存储副作用函数的桶中
       track(target, key)
@@ -246,19 +192,19 @@
 
 // obj.foo = 1
 
-const obj = {}
-const proto = { bar: 1 }
+const obj = {foo: 1}
+const proto = { bar: 2 }
 const child = reactive(obj)
 const parent = reactive(proto)
 
 // 使用 parent 作为 child 的原型
 Object.setPrototypeOf(child, parent)
 
+console.log('asdfasf', Object.getPrototypeOf(obj) === parent)
 effect(() => {
-  console.log(child, parent, child.bar);
+  console.log(child.bar);
 })
-console.log(child.raw === obj); // true
-console.log(parent.raw === proto); // true
-child.bar = 2
-// console.log('121', child.raw === obj);
+console.log('child.raw === obj', child.raw === obj); // true
+console.log('parent.raw === proto', parent.raw === proto); // true
+child.bar = 3
 </script>
