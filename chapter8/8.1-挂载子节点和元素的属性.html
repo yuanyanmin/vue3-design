@@ -1,0 +1,125 @@
+<body>
+  <div id="app"></div>
+</body>
+<!-- <script src="./base.js"></script> -->
+<script src="https://unpkg.com/@vue/reactivity@3.0.5/dist/reactivity.global.js"></script>
+
+<script>
+
+  const { effect, ref } = VueReactivity
+
+  function createRenderer(options) {
+    // 通过 options 得到操作 DOM 的 API
+    const {
+      createElement,
+      insert,
+      setElementText
+    } = options
+
+    function patch(n1, n2, container) {
+      // 如果n1不存在，意味着挂载，则调用 mountElement 函数完成挂载
+      if (!n1) {
+        mountElement(n2, container)
+      } else {
+        // n1 存在，意味着打补丁，暂时省略
+      }
+    }
+    function mountElement(vnode, container) {
+      // // 创建DOM
+      // const el = document.createElement(vnode.type)
+      // // 处理子节点，如果子节点是字符串，代表元素具有文本节点
+      // if (typeof vnode.children === 'string') {
+      //   // 因此只需要设置元素的 textContent 属性即可
+      //   el.textContent = vnode.children
+      // }
+      // // 将元素添加到容器中
+      // container.appendChild(el)
+
+      // 调用 createElement 函数创建元素
+      const el = createElement(vnode.type)
+
+      if (typeof vnode.children === 'string') {
+        // 调用 setElementText 设置元素的文本节点
+        setElementText(el, vnode.children)
+      } else if (Array.isArray(vnode.children)) {
+        // 如果 children 是数组，则遍历每一个子节点，并调用 patch 函数挂载它
+        vnode.children.forEach(child => {
+          patch(null, child, el)
+        });
+      }
+
+      // 如果 vnode.props 存在才处理它
+      if (vnode.props) {
+        // 比那里 vnode.props
+        for (const key in vnode.props) {
+          // 调用 setAttribute 将属性设置到元素上
+          // el.setAttribute(key, vnode.props[key])
+          // 直接设置
+          el[key] = vnode.props[key]
+        }
+      }
+      // 调用 insert 函数将元素插入到容器内
+      insert(el, container)
+    }
+    function render(vnode, container) {
+      if (vnode) {
+        // 新的 vnode 存在，将其与旧 vnode 一起传递给 patch 函数，进行打补丁
+        patch(container._vnode, vnode, container)
+      } else {
+        if (container._vnode) {
+          // 旧 vnode 存在，且新 vnode 不存在，说明是卸载 unmount 操作
+          // 只需要将 container 内的 DOM 清空即可
+          container.innerHTML = ''
+        }
+      }
+      // 把 vnode 存储到 container._vnode 下，即后续渲染中的旧 vnode
+      container._vnode = vnode
+    }
+    function hydrate(vnode, container) {
+
+    }
+
+    return {
+      render,
+      hydrate
+    }
+  }
+
+ 
+
+  // const vnode = {
+  //   type: 'h1',
+  //   children: 'hello'
+  // }
+
+  const vnode = {
+    type: 'h1',
+    props: {
+      id: 'foo'
+    },
+    children: [
+      {
+        type: 'p',
+        children: 'hello'
+      }
+    ]
+  }
+
+  const renderer = createRenderer({
+    // 用于创建元素
+    createElement(tag) {
+      return document.createElement(tag)
+    },
+    // 用于设置元素的文本节点
+    setElementText(el, text) {
+      el.textContent = text
+    },
+    // 用于在给定的 parent 下添加指定元素
+    insert(el, parent, anchor=null) {
+      parent.insertBefore(el, anchor)
+    }
+  })
+
+  renderer.render(vnode, document.querySelector('#app'))
+
+</script>
