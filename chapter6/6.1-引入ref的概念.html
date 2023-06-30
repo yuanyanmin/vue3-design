@@ -1,0 +1,349 @@
+<body>
+  
+</body>
+
+<script>
+
+// 存储副作用函数的桶
+const bucket = new WeakMap()
+const ITERATE_KEY = Symbol()
+
+// 定义一个 map 实例，存储原始对象到代理对象的映射
+const reactiveMap = new Map()
+
+function reactive(obj) {
+ // 有限通过原始对象 obj 寻找之前创建的代理对象，如果找到了，直接返回已有的代理对象
+ const existionProxy = reactiveMap.get(obj)
+ if (existionProxy) return existionProxy
+
+
+ // 否则创建新的代理对象
+ const proxy = createReactive(obj)
+ // 存储到 map 中，从而避免重复创建
+ reactiveMap.set(obj, proxy)
+ return proxy
+}
+
+function shallowReactive(obj) {
+ return createReactive(obj, true)
+}
+
+function readonly(obj) {
+ return createReactive(obj, false, true)
+}
+
+function shallowReadonly(obj) {
+ return createReactive(obj, true, true)
+}
+
+
+const arrayInstrumentations = {};
+
+;['includes', 'indexOf', 'lastIndexOf'].forEach(method => {
+  const originMethod = Array.prototype[method]
+  arrayInstrumentations[method] = function(...args) {
+    // this 是代理对象，先在代理对象中查找，将结果存储到res中
+    let res = originMethod.apply(this, args)
+    if (res === false || res === -1) {
+      // false 说明没找到，通过 this.raw 拿到原始数组，再去其中查找并更新 res值
+      res = originMethod.apply(this.raw, args)
+    }
+
+    // 返回最终结果
+    return res
+  }
+})
+
+// 一个标记变量，代表是否进行追踪。默认为true，即允许追踪
+let shouldTrack = true
+// 重写数组的 push 方法
+;['push', 'pop', 'shift', 'unshift', 'splice'].forEach(method => {
+  // 取得原始 push 方法
+  const originMethod = Array.prototype[method]
+  // 重写
+  arrayInstrumentations[method] = function(...args) {
+    // 在调用原始方法之前，禁止追踪
+    shouldTrack = false
+    // push 方法的默认行为
+    let res = originMethod.apply(this, args)
+    // 在调用原始方法之后，恢复原来的行为，即允许追踪
+    shouldTrack = true
+    return res
+  }
+
+})
+
+function createReactive(obj, isShallow = false, isReadonly=false) {
+  return new Proxy(obj, {
+    get(target, key, receiver) {
+      // 代理对象可以通过 raw 属性访问原始数据
+      if (key === 'raw') {
+        return target
+      }
+
+      // 如果操作的目标对象是数组，并且 key 存在于  arrayInstrumentations 上，
+      // 那么返回定义在 arrayInstrumentations 上的值
+
+      if (Array.isArray(target) && arrayInstrumentations.hasOwnProperty(key)) {
+        return Reflect.get(arrayInstrumentations, key, receiver)
+      }
+
+      // 非只读的时候才需要简历响应联系
+      if (!isReadonly && typeof key !== 'symbol') {
+        // 将副作用函数 acctiveEffect 添加到存储副作用函数的桶中
+        track(target, key)
+      }
+
+      // 得到原始值结果
+      const res = Reflect.get(target, key, receiver)
+
+      if (isShallow) {
+        return res
+      }
+
+      if (typeof res === 'object' && res !== null) {
+        // 调用 reactive 将结果包装成响应式数据并返回
+        // 如果数据只读，则调用 readonly 对值进行包装
+        return isReadonly ? readonly(res) : reactive(res)
+      }
+
+      // 返回属性值
+      return res
+    },
+    set(target, key, newVal, receiver) {
+      // 如果是只读的，则打印警告信息并返回
+      if (isReadonly) {
+        console.warn(`属性${key}是只读的`);
+        return true
+      }
+      // console.log('set', target, key, newVal, receiver);
+      // 先获取旧值
+      const oldVal = target[key]
+      // 设置属性值
+      //  target[key] = value
+      // 如果属性不存在，则说明是添加新属性，否则是设置已有属性
+      // 如果代理目标是数组，则检测被设置的索引值是否小于数组长度
+      // 如果是，则是做 SET 操作，否则是 ADD
+      const type = Array.isArray(target)
+      ? Number(key) < target.length ? 'SET' : 'ADD'
+      : Object.prototype.hasOwnProperty.call(target, key) ? 'SET' : 'ADD'
+      
+      // 设置属性值
+      const res = Reflect.set(target, key, newVal, receiver)
+
+      // target === receiver.raw 说明 receiver 就是 target 的代理对象
+      if (target === receiver.raw) {
+        // 比较新值和旧值，只要当不全等的时候才触发响应
+        if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
+          // 把副作用函数从桶里取出并执行
+          // 增加第四个参数，即触发响应的新值
+          trigger(target, key, type, newVal)
+        }
+      }
+
+      return res
+    },
+    has(target, key) {
+      track(target, key)
+      return Reflect.has(target, key)
+    },
+    ownKeys(target) {
+      console.log('ownkeys', target);
+      track(target, Array.isArray(target) ? 'length' : ITERATE_KEY)
+      return Reflect.ownKeys(target)
+    },
+    deleteProperty(target, key) {
+      // 如果是只读的，则打印警告信息并返回
+      if (isReadonly) {
+        console.warn(`属性${key}是只读的`);
+        return true
+      }
+      // 检查被操作的属性是否是对象自己的属性
+      const hadKey = Object.prototype.hasOwnProperty.call(target, key)
+      // 使用 Reflect.deletePrototype 完成属性的删除
+      const res = Reflect.deleteProperty(target, key)
+
+      if (res && hadKey) {
+        // 只有当删除的属性是对象自己的属性并且成功删除时，才触发更新
+        trigger(target, key, "DELETE")
+      }
+    }
+  })
+ }
+
+
+// 在 get 拦截函数内调用 track 函数追踪变化
+function track(target, key) {
+  // 当禁止追踪时，直接返回
+  if (!activeEffect || !shouldTrack) {
+    return
+  }
+  // 根据 target 从“桶”中取得depsMap,它是一个 Map 类型 key ---> effects
+  let depsMap = bucket.get(target)
+    // 如果不存在，则新建一个 Map 并与之 target 关联
+    if (!depsMap) {
+      bucket.set(target, (depsMap = new Map()))
+    }
+
+    // 在根据 key 从 depsMap 中取得 deps，它是一个 Set 类型
+    // 里面存储着所有与当前 key 相关联的副作用函数 effects
+    let deps = depsMap.get(key)
+    // 如果 deps 不存在，则同样新建一个 Set 与 key 关联
+    if (!deps) {
+      depsMap.set(key, (deps = new Set()))
+    }
+
+    // 最后将当前激活的副作用函数添加到桶中
+    deps.add(activeEffect)
+
+    // deps 就是一个与当前副作用函数存在联系的依赖集合
+    // 将其添加到 activeEffect.deps 数组中
+    activeEffect.deps.push(deps)
+}
+
+// 在 set 拦截函数内容调用 trigger 函数触发变化
+function trigger(target, key, type, newVal) {
+  // 根据 target 从桶中取出 depsMap, 它是 key ---> effects
+  const depsMap = bucket.get(target)
+
+  if (!depsMap) {
+    return
+  }
+
+  // 在根据 key 取得所有的副作用函数 effects
+  const effects = depsMap.get(key)
+  // 去的与 ITERATE_KEY 相关的副作用函数
+  const iterateEffects = depsMap.get(ITERATE_KEY)
+  
+  const effectToRun = new Set()
+
+  effects && effects.forEach(effectFn => {
+    // 如果 trigger 触发执行的副作用函数与当前正在执行的副作用函数相同，则不触发执行
+    if (effectFn !== activeEffect) {
+      effectToRun.add(effectFn)
+    }
+  })
+
+  if (type === 'ADD' || type === 'DELETE') {
+  iterateEffects && iterateEffects.forEach(effectFn => {
+    if (effectFn !== activeEffect) {
+      effectToRun.add(effectFn)
+    }
+  })
+  }
+
+
+  // 当操作类型为 ADD 并且目标对象是数组时候，应该取出并执行那些 与 length 属性相关联的副作用函数
+  if (type === 'ADD' && Array.isArray(target)) {
+  // 取出 length 相关联的副作用函数
+  const lengthEffects = depsMap.get('length')
+  // 将这些副作用函数添加到 effectToRun 中，待执行
+  lengthEffects && lengthEffects.forEach(effectFn => {
+    if (effectFn !== activeEffect) {
+      effectToRun.add(effectFn)
+    }
+  })
+  }
+
+  
+// 如果操作目标是数组，并且修改了数组的 length 属性
+if (Array.isArray(target) && key === 'length') {
+  // 对于索引大于或等于新的 length 值的元素
+  // 需要把所有相关联的副作用函数取出并添加到 effectsToRun 中待执行
+  depsMap.forEach((effects, key) => {
+    if (key >= newVal) {
+      effects.forEach(effectFn => {
+        if (effectFn !== activeEffect) {
+          effectToRun.add(effectFn)
+        }
+      })
+    }
+  })
+  }
+
+  effectToRun.forEach(effectFn => {
+    // 如果一个副作用函数存在调度器，则调用该调度器，并将副作用函数作为参数传递
+    if (effectFn.options.scheduler) { 
+      effectFn.options.scheduler(effectFn)
+    } else {
+      // 否则直接执行副作用函数（之前的默认行为）
+      effectFn()
+    }
+  })
+
+  // 执行副作用函数
+  // effectToRun && effectToRun.forEach(fn => fn())
+}
+
+// 用一个全局变量存储被注册的副作用函数
+let activeEffect
+// effect 栈
+const effectStack = []
+
+// effect 函数用于注册副作用函数
+function effect(fn, options = {}) {
+  const effectFn = () => {
+    // 调用 clearup 函数完成清除工作
+    cleanup(effectFn)
+    // 当 effectFn 执行的时候，将其设置为当前激活的副作用函数
+    activeEffect = effectFn
+    // 在调用副作用函数之前将当前副作用函数压入栈中
+    effectStack.push(effectFn)
+    fn()
+    // 在当前副作用函数执行完毕后，将当前副作用函数弹出栈，并把 activeEffect 还原为之前的值
+    effectStack.pop()
+    activeEffect = effectStack[effectStack.length - 1]
+  }
+  // 将 options 挂载到 effectFun 上
+  effectFn.options = options
+  // activeEffect.deps 用来存储所有与该副作用函数相关联的依赖集合
+  effectFn.deps = []
+  effectFn()
+}
+
+
+function cleanup(effectFn) {
+  // 遍历 effectFn.deps 数组
+  for(let i = 0; i < effectFn.deps.length; i++) {
+    // deps 是依赖集合
+    const deps = effectFn.deps[i]
+    // 将 effectFn 从依赖集合中移除
+    deps.delete(effectFn)
+  }
+  // 最后需要重置 effectFn.deps 数组
+  effectFn.deps.length = 0
+}
+
+// =================================================================
+
+// 封装一个 ref 函数
+function ref(val) {
+  // 在 ref 函数内部创建包裹对象
+  const wrapper = {
+    value: val
+  }
+
+  // 使用 Object.definePrototype 在 wrapper 对象上创建一个不可枚举的属性 __v_isRef, 并且值为 true
+  Object.defineProperty(wrapper, '__v_isRef', {
+    value: true
+  })
+
+  // 将包裹对象变成响应式对象
+  return reactive(wrapper)
+}
+
+function isRef(val) {
+  return val.__v_isRef === true
+}
+// 创建原始值的响应式数据
+const refVal1 = ref(1)
+const refVal2 = reactive({value: 1})
+
+effect(() => {
+  // 在副作用函数内通过 value 属性读取原始值
+  console.log(refVal1.value);
+})
+refVal1.value = 2
+console.log('refVal2', refVal1, refVal2);
+console.log('isRef', isRef(refVal1), isRef(refVal2));
+</script>
