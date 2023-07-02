@@ -1,6 +1,7 @@
 <body>
   <div id="app">
-    <input type="text" id="my-input" value="foo">
+
+
   </div>
 </body>
 <!-- <script src="./base.js"></script> -->
@@ -15,7 +16,8 @@
     const {
       createElement,
       insert,
-      setElementText
+      setElementText,
+      patchProps
     } = options
 
     function patch(n1, n2, container) {
@@ -26,6 +28,19 @@
         // n1 存在，意味着打补丁，暂时省略
       }
     }
+
+    function unmount(vnode, container) {
+      // 根据 vnode 获取要卸载的真实 DOM元素
+      const el = vnode.el
+      // 获取 el 的父元素
+      const parent = el.parentNode
+      // 调用 removeChild 移除元素
+      if (parent) {
+        parent.removeChild(el)
+      }
+    }
+
+    
     function mountElement(vnode, container) {
       // // 创建DOM
       // const el = document.createElement(vnode.type)
@@ -38,7 +53,8 @@
       // container.appendChild(el)
 
       // 调用 createElement 函数创建元素
-      const el = createElement(vnode.type)
+      // 让 vnode.el 引用真实 DOM 元素
+      const el = vnode.el = createElement(vnode.type)
 
       if (typeof vnode.children === 'string') {
         // 调用 setElementText 设置元素的文本节点
@@ -54,10 +70,7 @@
       if (vnode.props) {
         // 比那里 vnode.props
         for (const key in vnode.props) {
-          // 调用 setAttribute 将属性设置到元素上
-          // el.setAttribute(key, vnode.props[key])
-          // 直接设置
-          el[key] = vnode.props[key]
+          patchProps(el, key, null, vnode.props[key])
         }
       }
       // 调用 insert 函数将元素插入到容器内
@@ -71,7 +84,9 @@
         if (container._vnode) {
           // 旧 vnode 存在，且新 vnode 不存在，说明是卸载 unmount 操作
           // 只需要将 container 内的 DOM 清空即可
-          container.innerHTML = ''
+          // container.innerHTML = ''
+          
+          unmount(container._vnode)
         }
       }
       // 把 vnode 存储到 container._vnode 下，即后续渲染中的旧 vnode
@@ -87,24 +102,11 @@
     }
   }
 
- 
-
-  // const vnode = {
-  //   type: 'h1',
-  //   children: 'hello'
-  // }
-
-  const vnode = {
-    type: 'h1',
-    props: {
-      id: 'foo'
-    },
-    children: [
-      {
-        type: 'p',
-        children: 'hello'
-      }
-    ]
+  function shouldSetAsProps(el, key, value) {
+    // 特殊处理
+    if (key === 'form' && el.tagName === 'INPUT') return false
+    // 兜底
+    return key in el
   }
 
   const renderer = createRenderer({
@@ -119,13 +121,50 @@
     // 用于在给定的 parent 下添加指定元素
     insert(el, parent, anchor=null) {
       parent.insertBefore(el, anchor)
+    },
+    // 将属性设置相关操作封装到 patchProps 函数中，并作为渲染器选项传递
+    patchProps(el, key, prevValue, nextValue) {
+      // 用 in 操作符判断 key 是否存在对应的 DOM Properties
+      // if (key in el) {
+      // const value = vnode.props[key]
+      // 使用 shouldSetAsProps 函数判断是否应该作为 DOM Properties 设置
+      if (key === 'class') {
+        el.className = nextValue || ''
+      } else if (shouldSetAsProps(el, key, nextValue)) {
+        // 获取该 DOM Properties 的类型
+        const type = typeof el[key]
+        const value = vnode.props[key]
+
+        // 如果是布尔类型，并且 value 是空字符串，则将值矫正为 true
+        if (type === 'boolean' && value === '') {
+          el[key] = true
+        } else {
+          el[key] = value
+        }
+      } else {
+        // 如果要设置的属性没有对应的 DOM Properties, 则使用 setAttribute 函数设置属性
+        el.setAttribute(key, vnode.props[key])
+      }
+      // 调用 setAttribute 将属性设置到元素上
+      // el.setAttribute(key, vnode.props[key])
+      // 直接设置
+      // el[key] = vnode.props[key]
     }
   })
 
-  // renderer.render(vnode, document.querySelector('#app'))
+  const vnode = {
+    type: 'p',
+    props: {
+      class: 'foo bar'
+    },
+    children: 'bar'
+  }
 
-  const el = document.querySelector('#my-input')
 
-  console.log(el);
+  renderer.render(vnode, document.querySelector('#app'))
+
+  // 为null ,意味着卸载之前的渲染的内容
+  renderer.render(null, document.querySelector('#app'))
+
 
 </script>
