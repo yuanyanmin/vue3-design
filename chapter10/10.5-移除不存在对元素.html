@@ -140,7 +140,7 @@
         if (!oldStartVNode) {
           oldStartVNode = oldChildren[++oldStartIdx]
         } else if (!oldEndVNode) {
-          oldEndVNode = oldChildren[--oldEndIdx]
+          oldEndVNode = newChildren[--oldEndIdx]
         } else if (oldStartVNode.key === newStartVNode.key) {
           // 第一步：oldStartVNode 和 newStartVNode 比较
           //  调用 patch 函数在 oldStartVNode 与 newStartVNode 之间打补丁
@@ -161,7 +161,7 @@
           patch(oldStartVNode, newEndVNode, container)
           // 将旧的一组子节点头部节点对应的真实 DOM 节点 oldStartVNode.el 移动到
           // 旧的一组子节点的尾部节点对应的真实 DOM 节点后面
-          insert(oldStartVNode.el, container, newEndVNode.el.nextSibling)
+          insert(oldStartVNode.el, container, oldEndVNode.el.nextSibling)
           // 更新相关索引到下一个位置
           oldStartVNode = oldChildren[++oldStartIdx]
           newEndVNode = newChildren[--newEndIdx]
@@ -193,10 +193,29 @@
             oldChildren[idxInOld] = undefined
             // 最后更新 newStartIdx 到下一个位置
             newStartVNode = newChildren[++newStartIdx]
+          } else {
+            // 将 newStartVNode 作为新节点挂载到头部，使用当前头部节点 oldStartVNode.el 作为锚点
+            patch(null, newStartVNode, container, oldStartVNode.el)
           }
+          newStartVNode = newChildren[++newStartIdx]
+        }
+      }
+
+      // 循环结束后检查索引值的情况
+      if (oldEndIdx < oldStartIdx && newStartIdx <= newEndIdx) {
+        // 如果满足条件，则说明有新的节点遗留，需要挂载他们
+        for (let i = newStartIdx; i <= newEndIdx; i++) {
+          patch(null, newChildren[i], container, oldStartVNode.el)
+        }
+      } else if (newEndIdx < newStartIdx && oldStartIdx <= oldEndIdx) {
+        // 移除操作
+        for (let i = oldStartIdx; i <= oldEndIdx; i++) {
+          unmount(oldChildren[i])
         }
       }
     }
+
+    
 
     function unmount(vnode, container) {
       // 在卸载时，如果卸载的vnode类型为 Fragment,则需要卸载其 children
@@ -380,8 +399,7 @@ const Fragment = Symbol()
   children: [
     { type: 'p', children: '1', key: 1 },
     { type: 'p', children: '2', key: 2 },
-    { type: 'p', children: '3', key: 3 },
-    { type: 'p', children: '4', key: 4 }
+    { type: 'p', children: '3', key: 3 }
   ]
  }
 
@@ -389,8 +407,6 @@ const Fragment = Symbol()
  const newVNode = {
     type: 'div',
     children: [
-      { type: 'p', children: '2', key: 2 },
-      { type: 'p', children: '4', key: 4 },
       { type: 'p', children: '1', key: 1 },
       { type: 'p', children: '3', key: 3 }
     ]
